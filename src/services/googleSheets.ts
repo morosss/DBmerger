@@ -82,48 +82,82 @@ export async function fetchGoogleSheet(url: string): Promise<string> {
   const exportUrl = getExportUrl(sheetId)
 
   try {
-    // Try multiple CORS proxies for better reliability
-    const proxies = [
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(exportUrl)}`,
-      `https://corsproxy.io/?${encodeURIComponent(exportUrl)}`,
-      exportUrl // Try direct access as fallback (works if CORS is configured)
+    // Try multiple methods in order of reliability
+    const methods = [
+      // Method 1: Direct CSV export (best if sheet is public)
+      async () => {
+        const response = await fetch(exportUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'text/csv' }
+        })
+        if (response.ok) {
+          const text = await response.text()
+          if (text && !text.includes('<!DOCTYPE html>')) return text
+        }
+        throw new Error('Direct fetch failed')
+      },
+
+      // Method 2: AllOrigins CORS proxy
+      async () => {
+        const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(exportUrl)}`)
+        if (response.ok) {
+          const text = await response.text()
+          if (text && !text.includes('<!DOCTYPE html>')) return text
+        }
+        throw new Error('AllOrigins proxy failed')
+      },
+
+      // Method 3: CorsProxy.io
+      async () => {
+        const response = await fetch(`https://corsproxy.io/?${encodeURIComponent(exportUrl)}`)
+        if (response.ok) {
+          const text = await response.text()
+          if (text && !text.includes('<!DOCTYPE html>')) return text
+        }
+        throw new Error('CorsProxy failed')
+      },
+
+      // Method 4: cors-anywhere (backup)
+      async () => {
+        const response = await fetch(`https://cors-anywhere.herokuapp.com/${exportUrl}`)
+        if (response.ok) {
+          const text = await response.text()
+          if (text && !text.includes('<!DOCTYPE html>')) return text
+        }
+        throw new Error('Cors-anywhere failed')
+      }
     ]
 
     let lastError: Error | null = null
 
-    for (const proxyUrl of proxies) {
+    for (const method of methods) {
       try {
-        const response = await fetch(proxyUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          }
-        })
-
-        if (response.ok) {
-          const csvText = await response.text()
-
-          // Validate that we got actual CSV data
-          if (csvText && csvText.length > 0 && !csvText.includes('<!DOCTYPE html>')) {
-            return csvText
-          }
-        }
+        const result = await method()
+        console.log('Successfully fetched Google Sheet data')
+        return result
       } catch (err) {
         lastError = err as Error
-        console.warn(`Failed to fetch with proxy ${proxyUrl}:`, err)
+        console.warn('Fetch method failed:', err)
         continue
       }
     }
 
-    throw lastError || new Error('All proxy attempts failed')
+    throw lastError || new Error('All fetch methods failed')
   } catch (error) {
     console.error('Google Sheets fetch error:', error)
+
+    // Provide helpful error message with the export URL
+    const exportCsvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`
+
     throw new Error(`Failed to fetch data from Google Sheets.
 
-Possible solutions:
+✅ Direct CSV Export URL (try this manually):
+${exportCsvUrl}
+
+📋 Possible solutions:
 1. Make sure the sheet is set to "Anyone with the link can view"
-2. Check that the sheet URL is correct
-3. Try using the direct CSV export URL instead
+2. Download the CSV manually from the URL above and upload it
+3. Check Google Sheets sharing settings
 
 Sheet ID: ${sheetId}`)
   }
