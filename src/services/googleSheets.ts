@@ -10,21 +10,49 @@ export interface GoogleSheetConfig {
   type: 'tavi' | 'mteer'
 }
 
-// Predefined databases
-export const PREDEFINED_DATABASES: GoogleSheetConfig[] = [
-  {
-    id: 'tavi_main',
-    name: 'TAVI Database',
-    url: 'https://docs.google.com/spreadsheets/d/1_uF44XlYa261N_ob2uOJZKWhe6AwbGFXdHvuBvp6-vI/edit?usp=sharing',
-    type: 'tavi'
-  },
-  {
-    id: 'mteer_main',
-    name: 'M-TEER Database',
-    url: 'https://docs.google.com/spreadsheets/d/1D_4mYkNHxYnN0aCROmYMfeO3MfDgROg_/edit?usp=sharing&ouid=117269633109599488176&rtpof=true&sd=true',
-    type: 'mteer'
+// Predefined databases - URLs are configured via environment variables for security
+// Users can also add custom databases in the application settings
+export function getPredefinedDatabases(): GoogleSheetConfig[] {
+  const databases: GoogleSheetConfig[] = []
+
+  // Load from environment variables (for development/private deployments)
+  const taviUrl = import.meta.env.VITE_TAVI_DATABASE_URL
+  const mteerUrl = import.meta.env.VITE_MTEER_DATABASE_URL
+
+  if (taviUrl) {
+    databases.push({
+      id: 'tavi_main',
+      name: 'TAVI Database',
+      url: taviUrl,
+      type: 'tavi'
+    })
   }
-]
+
+  if (mteerUrl) {
+    databases.push({
+      id: 'mteer_main',
+      name: 'M-TEER Database',
+      url: mteerUrl,
+      type: 'mteer'
+    })
+  }
+
+  // Load from localStorage (user-configured databases)
+  try {
+    const customDbsJson = localStorage.getItem('custom_predefined_databases')
+    if (customDbsJson) {
+      const customDbs = JSON.parse(customDbsJson) as GoogleSheetConfig[]
+      databases.push(...customDbs)
+    }
+  } catch (error) {
+    console.warn('Failed to load custom databases:', error)
+  }
+
+  return databases
+}
+
+// For backward compatibility - now returns databases from function
+export const PREDEFINED_DATABASES = getPredefinedDatabases()
 
 /**
  * Extract Google Sheets ID from URL
