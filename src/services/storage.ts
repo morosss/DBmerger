@@ -41,6 +41,7 @@ export async function createProject(data: { name: string; description?: string }
       name: data.name,
       description: data.description,
       status: 'draft',
+      aiMatchUsageCount: 0,
       createdAt: new Date(),
       updatedAt: new Date()
     }
