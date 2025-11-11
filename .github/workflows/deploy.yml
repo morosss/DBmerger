@@ -32,6 +32,10 @@ jobs:
         run: npm ci
 
       - name: Build
+        env:
+          VITE_ANTHROPIC_API_KEY: ${{ secrets.VITE_ANTHROPIC_API_KEY }}
+          VITE_TAVI_DATABASE_URL: ${{ secrets.VITE_TAVI_DATABASE_URL }}
+          VITE_MTEER_DATABASE_URL: ${{ secrets.VITE_MTEER_DATABASE_URL }}
         run: npm run build
 
       - name: Upload artifact
