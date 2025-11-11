@@ -26,45 +26,48 @@ export async function matchColumnsWithLLM(
 ): Promise<LLMColumnMatchResponse> {
   const client = getClient()
 
-  const prompt = `You are a medical data expert helping to match column names between two clinical databases.
-Your task is to identify which columns in the source database correspond to columns in the target database.
+  const prompt = `You are an expert in clinical cardiovascular research data management, specializing in TAVI (Transcatheter Aortic Valve Implantation) and M-TEER (Mitral Transcatheter Edge-to-Edge Repair) procedures.
 
-Source Database Columns:
+Your task is to match column names between two clinical databases with high precision, considering medical terminology, multilingual variations, and common abbreviations used in interventional cardiology.
+
+SOURCE DATABASE COLUMNS:
 ${request.sourceColumns.map((col, i) => `${i + 1}. ${col}`).join('\n')}
 
-Target Database Columns:
+TARGET DATABASE COLUMNS:
 ${request.targetColumns.map((col, i) => `${i + 1}. ${col}`).join('\n')}
 
-${request.context ? `\nAdditional Context: ${request.context}` : ''}
+${request.context ? `\nCLINICAL CONTEXT: ${request.context}` : ''}
 
-Please analyze these columns and provide matches. Consider:
-- Exact matches (same name)
-- Semantic matches (different names but same meaning)
-- Multilingual matches (e.g., "age" and "età" in Italian)
-- Common medical abbreviations and terminology
-- Date fields, ID fields, demographic data, procedure data
+MATCHING GUIDELINES:
+• Patient Identifiers: ID, patient_id, paziente_id, numero_paziente, record_number
+• Demographics: age/età, sex/sesso/gender, DOB/data_nascita, weight/peso, height/altezza, BMI
+• Dates: procedure_date/data_procedura, admission/ricovero, discharge/dimissione, follow_up dates
+• TAVI-specific: valve_type/tipo_valvola (Sapien, Evolut, Navitor, Acurate), valve_size/dimensione, access_site/via_accesso (transfemoral/TF, transapical/TA, transaortic/TAo)
+• M-TEER-specific: clip_type/tipo_clip (MitraClip, PASCAL), number_of_clips/numero_clip, leaflet insertion
+• Outcomes: mortality/mortalità/morte, stroke/ictus, MI/infarto/IMA, bleeding/sanguinamento, vascular complications/complicanze_vascolari
+• Echo parameters: LVEF/FE, gradient/gradiente, AR/rigurgito_aortico, MR/rigurgito_mitralico
+• Lab values: creatinine/creatinina, hemoglobin/emoglobina, NT-proBNP, troponin/troponina
 
-For each match, provide:
-1. The source column name (exact match)
-2. The target column name (exact match)
-3. A confidence score (0-100)
-4. A brief reasoning for the match
+CRITICAL RULES:
+1. Match EXACT column names from the lists above (preserve case, spaces, underscores)
+2. Consider Italian-English translations (età=age, sesso=sex, morte=death)
+3. Recognize medical abbreviations (FE=LVEF, IMA=MI, TA=transapical)
+4. Only return matches with confidence >70%
+5. Prefer exact matches over semantic matches
 
-Format your response as a JSON array:
+OUTPUT FORMAT (JSON array only):
 [
   {
-    "source": "column name from source",
-    "target": "column name from target",
+    "source": "exact_column_name_from_source",
+    "target": "exact_column_name_from_target",
     "confidence": 95,
-    "reasoning": "Brief explanation"
+    "reasoning": "Brief reason"
   }
-]
-
-Only include matches where you have reasonable confidence (>60). Return only the JSON array, no additional text.`
+]`
 
   try {
     const message = await client.messages.create({
-      model: 'claude-haiku-4-5-20250929',
+      model: 'claude-haiku-4-5',
       max_tokens: 4096,
       messages: [{
         role: 'user',
