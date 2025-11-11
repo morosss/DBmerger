@@ -54,21 +54,50 @@ export async function fetchGoogleSheet(url: string): Promise<string> {
   const exportUrl = getExportUrl(sheetId)
 
   try {
-    // Use a CORS proxy for client-side requests
-    // In production, you might want to use your own proxy or configure CORS
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(exportUrl)}`
+    // Try multiple CORS proxies for better reliability
+    const proxies = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(exportUrl)}`,
+      `https://corsproxy.io/?${encodeURIComponent(exportUrl)}`,
+      exportUrl // Try direct access as fallback (works if CORS is configured)
+    ]
 
-    const response = await fetch(proxyUrl)
+    let lastError: Error | null = null
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch Google Sheet: ${response.statusText}`)
+    for (const proxyUrl of proxies) {
+      try {
+        const response = await fetch(proxyUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          }
+        })
+
+        if (response.ok) {
+          const csvText = await response.text()
+
+          // Validate that we got actual CSV data
+          if (csvText && csvText.length > 0 && !csvText.includes('<!DOCTYPE html>')) {
+            return csvText
+          }
+        }
+      } catch (err) {
+        lastError = err as Error
+        console.warn(`Failed to fetch with proxy ${proxyUrl}:`, err)
+        continue
+      }
     }
 
-    const csvText = await response.text()
-    return csvText
+    throw lastError || new Error('All proxy attempts failed')
   } catch (error) {
     console.error('Google Sheets fetch error:', error)
-    throw new Error('Failed to fetch data from Google Sheets. Please ensure the sheet is publicly accessible or shared with the appropriate permissions.')
+    throw new Error(`Failed to fetch data from Google Sheets.
+
+Possible solutions:
+1. Make sure the sheet is set to "Anyone with the link can view"
+2. Check that the sheet URL is correct
+3. Try using the direct CSV export URL instead
+
+Sheet ID: ${sheetId}`)
   }
 }
 
