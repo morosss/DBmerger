@@ -32,7 +32,7 @@ export default function Dashboard() {
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
         <p className="mt-2 text-gray-600">
-          Welcome to Clinical Data Manager - Manage your cardiovascular study databases
+          Welcome to DBmerger - Manage your cardiovascular study databases
         </p>
       </div>
 

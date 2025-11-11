@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Cloud } from 'lucide-react'
 import { Project } from '../types'
 import { parseFile } from '../services/parser'
-import { PREDEFINED_DATABASES, importPredefinedDatabase } from '../services/googleSheets'
+import { getPredefinedDatabases, importPredefinedDatabase } from '../services/googleSheets'
 
 interface FileUploadEnhancedProps {
   project: Project
@@ -50,7 +50,7 @@ export default function FileUploadEnhanced({ project, onUpdate }: FileUploadEnha
       return
     }
 
-    const config = PREDEFINED_DATABASES.find(db => db.id === dbId)
+    const config = getPredefinedDatabases().find(db => db.id === dbId)
     if (!config) return
 
     setLoadingPredefined(true)
@@ -193,12 +193,18 @@ export default function FileUploadEnhanced({ project, onUpdate }: FileUploadEnha
                 className="input-field"
               >
                 <option value="">Select a database...</option>
-                {PREDEFINED_DATABASES.map((db) => (
+                {getPredefinedDatabases().map((db) => (
                   <option key={db.id} value={db.id}>
                     {db.name} ({db.type.toUpperCase()})
                   </option>
                 ))}
               </select>
+
+              {getPredefinedDatabases().length === 0 && (
+                <p className="text-sm text-gray-600 mt-2">
+                  No predefined databases configured. You can still upload Excel/CSV files directly.
+                </p>
+              )}
 
               {loadingPredefined && (
                 <div className="flex items-center justify-center py-8 bg-blue-50 border-2 border-dashed border-blue-300 rounded-lg">

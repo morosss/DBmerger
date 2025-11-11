@@ -27,7 +27,7 @@ export default function Layout({ children }: LayoutProps) {
               <div className="flex-shrink-0 flex items-center">
                 <Database className="h-8 w-8 text-primary-600" />
                 <span className="ml-2 text-xl font-bold text-gray-900">
-                  Clinical Data Manager
+                  DBmerger
                 </span>
               </div>
               <div className="hidden sm:ml-8 sm:flex sm:space-x-4">
@@ -63,7 +63,7 @@ export default function Layout({ children }: LayoutProps) {
       <footer className="bg-white border-t border-gray-200 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <p className="text-center text-sm text-gray-500">
-            Clinical Data Manager - Secure data management for multicenter cardiovascular studies
+            DBmerger - Secure data management for multicenter cardiovascular studies
           </p>
         </div>
       </footer>

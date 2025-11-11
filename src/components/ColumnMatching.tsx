@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Zap, Check, X, ArrowRight, AlertCircle, Sparkles } from 'lucide-react'
+import { Zap, Check, X, ArrowRight, AlertCircle, Sparkles, PlusCircle } from 'lucide-react'
 import { Project, ColumnMatch, ColumnMatchingResult } from '../types'
 import { matchColumnsWithLLM, quickMatchColumns } from '../services/llm'
 
@@ -8,6 +8,8 @@ interface ColumnMatchingProps {
   onUpdate: (project: Project) => void
   onNext: () => void
 }
+
+const AI_MATCH_LIMIT = 1 // Maximum AI matches per project to control API costs
 
 export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatchingProps) {
   const [matches, setMatches] = useState<ColumnMatch[]>([])
@@ -18,6 +20,8 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
 
   const indexDb = project.indexDatabase
   const targetDb = project.targetDatabase
+  const aiUsageCount = project.aiMatchUsageCount || 0
+  const aiUsageRemaining = AI_MATCH_LIMIT - aiUsageCount
 
   useEffect(() => {
     if (project.columnMatching) {
@@ -56,6 +60,12 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
 
   const handleAIMatch = async () => {
     if (!indexDb || !targetDb) return
+
+    // Check AI usage limit
+    if (aiUsageRemaining <= 0) {
+      setError(`AI matching limit reached (${AI_MATCH_LIMIT} use${AI_MATCH_LIMIT > 1 ? 's' : ''} per project). This helps control API costs. You can still use Quick Match or add manual matches.`)
+      return
+    }
 
     setLoading(true)
     setError('')
@@ -111,6 +121,14 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
       setMatches(allMatches)
       setUnmatchedSource(sourceColumns.filter(c => !allMatchedSources.has(c)))
       setUnmatchedTarget(targetColumns.filter(c => !allMatchedTargets.has(c)))
+
+      // Increment AI usage counter
+      const updatedProject = {
+        ...project,
+        aiMatchUsageCount: aiUsageCount + 1,
+        updatedAt: new Date()
+      }
+      onUpdate(updatedProject)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AI matching failed')
       // Fall back to quick match
@@ -135,6 +153,54 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
     }
 
     setMatches([...matches, newMatch])
+  }
+
+  const handleCreateNewColumn = (sourceCol: string) => {
+    const newColumnName = prompt(
+      `Create a new column in the target database for "${sourceCol}".\n\nEnter the name for the new column:`,
+      sourceCol
+    )
+
+    if (!newColumnName || !newColumnName.trim()) {
+      return
+    }
+
+    const trimmedName = newColumnName.trim()
+
+    // Check if column already exists
+    if (targetDb?.columns.some(c => c.name === trimmedName)) {
+      alert(`Column "${trimmedName}" already exists in the target database.`)
+      return
+    }
+
+    // Add new column to target database
+    if (targetDb) {
+      const newColumn = {
+        name: trimmedName,
+        index: targetDb.columns.length,
+        dataType: 'string' as const,
+        sampleValues: []
+      }
+
+      const updatedTargetDb = {
+        ...targetDb,
+        columns: [...targetDb.columns, newColumn]
+      }
+
+      // Update project with new target database
+      const updatedProject = {
+        ...project,
+        targetDatabase: updatedTargetDb,
+        updatedAt: new Date()
+      }
+
+      onUpdate(updatedProject)
+
+      // Create automatic match
+      handleManualMatch(sourceCol, trimmedName)
+
+      alert(`New column "${trimmedName}" created in target database and matched with "${sourceCol}".`)
+    }
   }
 
   const handleRemoveMatch = (match: ColumnMatch) => {
@@ -201,32 +267,50 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
       </div>
 
       {/* Matching Controls */}
-      <div className="flex gap-3">
-        <button
-          onClick={handleQuickMatch}
-          disabled={loading}
-          className="btn-secondary flex items-center"
-        >
-          <Zap className="h-4 w-4 mr-2" />
-          Quick Match
-        </button>
-        <button
-          onClick={handleAIMatch}
-          disabled={loading}
-          className="btn-primary flex items-center"
-        >
-          {loading ? (
-            <>
-              <div className="spinner mr-2" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />
-              AI Matching...
-            </>
-          ) : (
-            <>
-              <Sparkles className="h-4 w-4 mr-2" />
-              AI Match with Claude
-            </>
-          )}
-        </button>
+      <div className="space-y-3">
+        <div className="flex gap-3">
+          <button
+            onClick={handleQuickMatch}
+            disabled={loading}
+            className="btn-secondary flex items-center"
+          >
+            <Zap className="h-4 w-4 mr-2" />
+            Quick Match
+          </button>
+          <button
+            onClick={handleAIMatch}
+            disabled={loading || aiUsageRemaining <= 0}
+            className={`btn-primary flex items-center ${aiUsageRemaining <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={aiUsageRemaining <= 0 ? 'AI matching limit reached' : `${aiUsageRemaining} AI match${aiUsageRemaining !== 1 ? 'es' : ''} remaining`}
+          >
+            {loading ? (
+              <>
+                <div className="spinner mr-2" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />
+                AI Matching...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4 mr-2" />
+                AI Match with Claude
+                {aiUsageRemaining > 0 && (
+                  <span className="ml-2 px-2 py-0.5 bg-white bg-opacity-30 rounded text-xs">
+                    {aiUsageRemaining}/{AI_MATCH_LIMIT}
+                  </span>
+                )}
+              </>
+            )}
+          </button>
+        </div>
+
+        {aiUsageRemaining <= 0 && (
+          <div className="flex items-start p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <AlertCircle className="h-5 w-5 text-blue-600 mr-3 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-blue-800">
+              <p className="font-medium">AI matching limit reached</p>
+              <p className="mt-1">You've used your {AI_MATCH_LIMIT} AI match{AI_MATCH_LIMIT > 1 ? 'es' : ''} for this project. You can still use <strong>Quick Match</strong> (free, instant) or add <strong>manual matches</strong> below.</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -324,21 +408,32 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
               <label className="label">Source Column (Index DB)</label>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {unmatchedSource.map(col => (
-                  <button
-                    key={col}
-                    onClick={() => {
-                      const target = prompt(`Match "${col}" to which target column?`)
-                      if (target && unmatchedTarget.includes(target)) {
-                        handleManualMatch(col, target)
-                      }
-                    }}
-                    className="w-full text-left p-3 border border-gray-200 rounded hover:border-primary-400 hover:bg-primary-50 transition-colors"
-                  >
-                    <p className="font-medium text-gray-900">{col}</p>
-                    <p className="text-xs text-gray-500">Click to match</p>
-                  </button>
+                  <div key={col} className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        const target = prompt(`Match "${col}" to which target column?`)
+                        if (target && unmatchedTarget.includes(target)) {
+                          handleManualMatch(col, target)
+                        }
+                      }}
+                      className="flex-1 text-left p-3 border border-gray-200 rounded hover:border-primary-400 hover:bg-primary-50 transition-colors"
+                    >
+                      <p className="font-medium text-gray-900">{col}</p>
+                      <p className="text-xs text-gray-500">Click to match</p>
+                    </button>
+                    <button
+                      onClick={() => handleCreateNewColumn(col)}
+                      className="px-3 py-2 border-2 border-green-200 bg-green-50 text-green-700 rounded hover:bg-green-100 hover:border-green-300 transition-colors flex items-center"
+                      title="Create new column in target database"
+                    >
+                      <PlusCircle className="h-5 w-5" />
+                    </button>
+                  </div>
                 ))}
               </div>
+              <p className="text-xs text-gray-600 mt-2">
+                💡 Click <PlusCircle className="h-3 w-3 inline" /> to create a new column in the target database
+              </p>
             </div>
             <div>
               <label className="label">Target Column (Target DB)</label>

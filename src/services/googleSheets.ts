@@ -10,21 +10,49 @@ export interface GoogleSheetConfig {
   type: 'tavi' | 'mteer'
 }
 
-// Predefined databases
-export const PREDEFINED_DATABASES: GoogleSheetConfig[] = [
-  {
-    id: 'tavi_main',
-    name: 'TAVI Database',
-    url: 'https://docs.google.com/spreadsheets/d/1_uF44XlYa261N_ob2uOJZKWhe6AwbGFXdHvuBvp6-vI/edit?usp=sharing',
-    type: 'tavi'
-  },
-  {
-    id: 'mteer_main',
-    name: 'M-TEER Database',
-    url: 'https://docs.google.com/spreadsheets/d/1D_4mYkNHxYnN0aCROmYMfeO3MfDgROg_/edit?usp=sharing&ouid=117269633109599488176&rtpof=true&sd=true',
-    type: 'mteer'
+// Predefined databases - URLs are configured via environment variables for security
+// Users can also add custom databases in the application settings
+export function getPredefinedDatabases(): GoogleSheetConfig[] {
+  const databases: GoogleSheetConfig[] = []
+
+  // Load from environment variables (for development/private deployments)
+  const taviUrl = import.meta.env.VITE_TAVI_DATABASE_URL
+  const mteerUrl = import.meta.env.VITE_MTEER_DATABASE_URL
+
+  if (taviUrl) {
+    databases.push({
+      id: 'tavi_main',
+      name: 'TAVI Database',
+      url: taviUrl,
+      type: 'tavi'
+    })
   }
-]
+
+  if (mteerUrl) {
+    databases.push({
+      id: 'mteer_main',
+      name: 'M-TEER Database',
+      url: mteerUrl,
+      type: 'mteer'
+    })
+  }
+
+  // Load from localStorage (user-configured databases)
+  try {
+    const customDbsJson = localStorage.getItem('custom_predefined_databases')
+    if (customDbsJson) {
+      const customDbs = JSON.parse(customDbsJson) as GoogleSheetConfig[]
+      databases.push(...customDbs)
+    }
+  } catch (error) {
+    console.warn('Failed to load custom databases:', error)
+  }
+
+  return databases
+}
+
+// For backward compatibility - now returns databases from function
+export const PREDEFINED_DATABASES = getPredefinedDatabases()
 
 /**
  * Extract Google Sheets ID from URL
@@ -54,21 +82,50 @@ export async function fetchGoogleSheet(url: string): Promise<string> {
   const exportUrl = getExportUrl(sheetId)
 
   try {
-    // Use a CORS proxy for client-side requests
-    // In production, you might want to use your own proxy or configure CORS
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(exportUrl)}`
+    // Try multiple CORS proxies for better reliability
+    const proxies = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(exportUrl)}`,
+      `https://corsproxy.io/?${encodeURIComponent(exportUrl)}`,
+      exportUrl // Try direct access as fallback (works if CORS is configured)
+    ]
 
-    const response = await fetch(proxyUrl)
+    let lastError: Error | null = null
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch Google Sheet: ${response.statusText}`)
+    for (const proxyUrl of proxies) {
+      try {
+        const response = await fetch(proxyUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          }
+        })
+
+        if (response.ok) {
+          const csvText = await response.text()
+
+          // Validate that we got actual CSV data
+          if (csvText && csvText.length > 0 && !csvText.includes('<!DOCTYPE html>')) {
+            return csvText
+          }
+        }
+      } catch (err) {
+        lastError = err as Error
+        console.warn(`Failed to fetch with proxy ${proxyUrl}:`, err)
+        continue
+      }
     }
 
-    const csvText = await response.text()
-    return csvText
+    throw lastError || new Error('All proxy attempts failed')
   } catch (error) {
     console.error('Google Sheets fetch error:', error)
-    throw new Error('Failed to fetch data from Google Sheets. Please ensure the sheet is publicly accessible or shared with the appropriate permissions.')
+    throw new Error(`Failed to fetch data from Google Sheets.
+
+Possible solutions:
+1. Make sure the sheet is set to "Anyone with the link can view"
+2. Check that the sheet URL is correct
+3. Try using the direct CSV export URL instead
+
+Sheet ID: ${sheetId}`)
   }
 }
 

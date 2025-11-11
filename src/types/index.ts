@@ -57,6 +57,7 @@ export interface Project {
   targetDatabase?: Database;
   patientSelection?: PatientSelection;
   columnMatching?: ColumnMatchingResult;
+  aiMatchUsageCount?: number; // Track number of AI column matching uses
   createdAt: Date;
   updatedAt: Date;
   status: 'draft' | 'in-progress' | 'completed';

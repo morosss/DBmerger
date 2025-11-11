@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Users, Plus, Trash2, Filter, List, ArrowRight } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Users, Plus, Trash2, Filter, List, ArrowRight, ChevronDown, Check } from 'lucide-react'
 import { Project, FilterCondition, PatientSelection as PatientSelectionType } from '../types'
 
 interface PatientSelectionProps {
@@ -72,6 +72,20 @@ export default function PatientSelection({ project, onUpdate, onNext }: PatientS
     setPreviewData(selected.slice(0, 10))
   }
 
+  const getUniqueValues = (columnName: string): string[] => {
+    if (!indexDb) return []
+
+    const uniqueSet = new Set<string>()
+    indexDb.data.forEach(row => {
+      const value = row[columnName]
+      if (value !== null && value !== undefined && value !== '') {
+        uniqueSet.add(String(value))
+      }
+    })
+
+    return Array.from(uniqueSet).sort()
+  }
+
   const applyFilters = (data: any[], filters: FilterCondition[]): any[] => {
     if (filters.length === 0) return data
 
@@ -85,10 +99,20 @@ export default function PatientSelection({ project, onUpdate, onNext }: PatientS
 
         switch (filter.operator) {
           case 'equals':
-            matches = String(value) === String(filter.value)
+            // Support both single value and array of values
+            if (Array.isArray(filter.value)) {
+              matches = filter.value.includes(String(value))
+            } else {
+              matches = String(value) === String(filter.value)
+            }
             break
           case 'notEquals':
-            matches = String(value) !== String(filter.value)
+            // Support both single value and array of values
+            if (Array.isArray(filter.value)) {
+              matches = !filter.value.includes(String(value))
+            } else {
+              matches = String(value) !== String(filter.value)
+            }
             break
           case 'contains':
             matches = String(value).toLowerCase().includes(String(filter.value).toLowerCase())
@@ -162,6 +186,135 @@ export default function PatientSelection({ project, onUpdate, onNext }: PatientS
 
     onUpdate(updatedProject)
     onNext()
+  }
+
+  // Multi-select dropdown component
+  const MultiSelectDropdown = ({ filter }: { filter: FilterCondition }) => {
+    const [isOpen, setIsOpen] = useState(false)
+    const [searchTerm, setSearchTerm] = useState('')
+    const dropdownRef = useRef<HTMLDivElement>(null)
+
+    const uniqueValues = getUniqueValues(filter.column)
+    const selectedValues = Array.isArray(filter.value) ? filter.value : (filter.value ? [String(filter.value)] : [])
+
+    const filteredValues = searchTerm
+      ? uniqueValues.filter(v => v.toLowerCase().includes(searchTerm.toLowerCase()))
+      : uniqueValues
+
+    useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+          setIsOpen(false)
+        }
+      }
+
+      if (isOpen) {
+        document.addEventListener('mousedown', handleClickOutside)
+      }
+
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [isOpen])
+
+    const toggleValue = (value: string) => {
+      let newValues: string[]
+      if (selectedValues.includes(value)) {
+        newValues = selectedValues.filter(v => v !== value)
+      } else {
+        newValues = [...selectedValues, value]
+      }
+      updateFilter(filter.id, { value: newValues })
+    }
+
+    const selectAll = () => {
+      updateFilter(filter.id, { value: filteredValues })
+    }
+
+    const clearAll = () => {
+      updateFilter(filter.id, { value: [] })
+    }
+
+    return (
+      <div ref={dropdownRef} className="relative">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="input-field w-full text-left flex items-center justify-between"
+        >
+          <span className="truncate">
+            {selectedValues.length === 0
+              ? 'Select values...'
+              : `${selectedValues.length} selected`}
+          </span>
+          <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {isOpen && (
+          <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-80 overflow-hidden">
+            {/* Search bar */}
+            <div className="p-2 border-b border-gray-200">
+              <input
+                type="text"
+                placeholder="Search values..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="input-field text-sm"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2 p-2 border-b border-gray-200 bg-gray-50">
+              <button
+                type="button"
+                onClick={selectAll}
+                className="text-xs px-2 py-1 bg-primary-100 text-primary-700 rounded hover:bg-primary-200"
+              >
+                Select All {filteredValues.length > 0 && `(${filteredValues.length})`}
+              </button>
+              <button
+                type="button"
+                onClick={clearAll}
+                className="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+              >
+                Clear
+              </button>
+            </div>
+
+            {/* Values list */}
+            <div className="overflow-y-auto max-h-60">
+              {filteredValues.length === 0 ? (
+                <div className="p-4 text-center text-sm text-gray-500">
+                  No values found
+                </div>
+              ) : (
+                filteredValues.map((value) => (
+                  <label
+                    key={value}
+                    className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedValues.includes(value)}
+                      onChange={() => toggleValue(value)}
+                      className="mr-2 h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+                    />
+                    <span className="text-sm flex-1 truncate">{value}</span>
+                    {selectedValues.includes(value) && (
+                      <Check className="h-4 w-4 text-primary-600" />
+                    )}
+                  </label>
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-2 border-t border-gray-200 bg-gray-50 text-xs text-gray-600">
+              {uniqueValues.length} unique values in column
+            </div>
+          </div>
+        )}
+      </div>
+    )
   }
 
   if (!indexDb) {
@@ -287,13 +440,17 @@ export default function PatientSelection({ project, onUpdate, onNext }: PatientS
                       </select>
                     </div>
                     <div className="col-span-4">
-                      <input
-                        type="text"
-                        value={filter.value}
-                        onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
-                        placeholder="Value..."
-                        className="input-field"
-                      />
+                      {(filter.operator === 'equals' || filter.operator === 'notEquals') ? (
+                        <MultiSelectDropdown filter={filter} />
+                      ) : (
+                        <input
+                          type="text"
+                          value={Array.isArray(filter.value) ? filter.value.join(', ') : filter.value}
+                          onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                          placeholder="Value..."
+                          className="input-field"
+                        />
+                      )}
                     </div>
                     <div className="col-span-1">
                       <button
