@@ -213,6 +213,7 @@ export async function exportToExcel(
 
 /**
  * Export merged data with formatting preservation
+ * Preserves all cell styles, colors, borders, fonts, etc. from target template
  */
 export async function exportMergedData(
   targetTemplate: File,
@@ -225,39 +226,102 @@ export async function exportMergedData(
     reader.onload = async (e) => {
       try {
         const data = e.target?.result
-        const workbook = XLSX.read(data, { type: 'binary', cellStyles: true })
-
-        // Get first sheet
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
-
-        // Get existing data
-        const existingData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][]
-
-        // Add new rows
-        const newRows = selectedData.map(row => {
-          const mappedRow: any[] = []
-          Object.keys(columnMapping).forEach(targetCol => {
-            const sourceCol = columnMapping[targetCol]
-            mappedRow.push(row[sourceCol] || '')
-          })
-          return mappedRow
+        // Read workbook WITH all formatting preserved
+        const workbook = XLSX.read(data, {
+          type: 'binary',
+          cellStyles: true,
+          cellNF: true,
+          cellHTML: true
         })
 
-        // Append new rows to existing data
-        const allData: any[][] = [...existingData, ...newRows]
+        // Get first sheet
+        const firstSheetName = workbook.SheetNames[0]
+        const worksheet = workbook.Sheets[firstSheetName]
 
-        // Create new worksheet
-        const newSheet = XLSX.utils.aoa_to_sheet(allData)
+        // Get sheet range
+        const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1')
+        const startRow = range.s.r
+        const endRow = range.e.r
+        const startCol = range.s.c
+        const endCol = range.e.c
 
-        // Replace sheet
-        workbook.Sheets[workbook.SheetNames[0]] = newSheet
+        // Get header row (assume first row is header)
+        const headerRow = startRow
+        const dataStartRow = startRow + 1
+
+        // Get column order from header
+        const columnOrder: string[] = []
+        for (let col = startCol; col <= endCol; col++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: headerRow, c: col })
+          const cell = worksheet[cellAddress]
+          if (cell && cell.v) {
+            columnOrder.push(String(cell.v))
+          }
+        }
+
+        // Copy style template from first data row (if exists)
+        const styleTemplateRow = dataStartRow < endRow ? dataStartRow : headerRow
+        const cellStyleTemplates: any[] = []
+
+        for (let col = startCol; col <= endCol; col++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: styleTemplateRow, c: col })
+          const cell = worksheet[cellAddress]
+          if (cell) {
+            cellStyleTemplates[col] = {
+              s: cell.s ? JSON.parse(JSON.stringify(cell.s)) : undefined, // Deep clone style
+              t: cell.t,
+              z: cell.z
+            }
+          }
+        }
+
+        // Find the next available row
+        let nextRow = endRow + 1
+
+        // Add new data rows with formatting
+        selectedData.forEach((row) => {
+          columnOrder.forEach((targetCol, colIdx) => {
+            const col = startCol + colIdx
+            const sourceCol = columnMapping[targetCol]
+            const value = sourceCol ? row[sourceCol] : ''
+
+            const cellAddress = XLSX.utils.encode_cell({ r: nextRow, c: col })
+
+            // Create cell with value
+            const cell: any = {
+              v: value,
+              t: typeof value === 'number' ? 'n' : 's'
+            }
+
+            // Apply style from template
+            if (cellStyleTemplates[col]) {
+              if (cellStyleTemplates[col].s) {
+                cell.s = JSON.parse(JSON.stringify(cellStyleTemplates[col].s))
+              }
+              if (cellStyleTemplates[col].z) {
+                cell.z = cellStyleTemplates[col].z
+              }
+            }
+
+            worksheet[cellAddress] = cell
+          })
+          nextRow++
+        })
+
+        // Update sheet range
+        range.e.r = nextRow - 1
+        worksheet['!ref'] = XLSX.utils.encode_range(range)
 
         // Generate filename
         const timestamp = new Date().toISOString().split('T')[0]
         const fileName = `merged_${timestamp}_${targetTemplate.name}`
 
-        // Download
-        XLSX.writeFile(workbook, fileName)
+        // Write file with styles preserved
+        XLSX.writeFile(workbook, fileName, {
+          cellStyles: true,
+          bookType: 'xlsx'
+        })
+
         resolve()
       } catch (error) {
         reject(error)

@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
-import { Link, useLocation } from 'react-router-dom'
-import { Home, FolderPlus, Folders, Database } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Home, FolderPlus, Folders, Database, LogOut, User } from 'lucide-react'
+import { getCurrentUser, logout } from '../services/auth'
 
 interface LayoutProps {
   children: ReactNode
@@ -8,6 +9,8 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
+  const navigate = useNavigate()
+  const currentUser = getCurrentUser()
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: Home },
@@ -16,6 +19,11 @@ export default function Layout({ children }: LayoutProps) {
   ]
 
   const isActive = (path: string) => location.pathname === path
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -49,6 +57,27 @@ export default function Layout({ children }: LayoutProps) {
                   )
                 })}
               </div>
+            </div>
+
+            {/* User Info & Logout */}
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center text-sm text-gray-700">
+                <User className="h-4 w-4 mr-2 text-gray-500" />
+                <span className="font-medium">{currentUser?.username}</span>
+                {currentUser?.role === 'admin' && (
+                  <span className="ml-2 px-2 py-0.5 bg-primary-100 text-primary-700 text-xs rounded-full">
+                    Admin
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                title="Logout"
+              >
+                <LogOut className="h-4 w-4 mr-1" />
+                Logout
+              </button>
             </div>
           </div>
         </div>
