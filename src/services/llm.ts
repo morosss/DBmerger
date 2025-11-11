@@ -64,7 +64,7 @@ Only include matches where you have reasonable confidence (>60). Return only the
 
   try {
     const message = await client.messages.create({
-      model: 'claude-haiku-4-5-20250929',
+      model: 'claude-3-5-haiku-20241022',
       max_tokens: 4096,
       messages: [{
         role: 'user',
@@ -138,52 +138,145 @@ export const COMMON_COLUMN_MAPPINGS: Record<string, string[]> = {
 }
 
 /**
- * Quick column matching using common mappings
+ * Calculate similarity between two strings (0-1, higher is better)
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const s1 = str1.toLowerCase().trim()
+  const s2 = str2.toLowerCase().trim()
+
+  // Exact match
+  if (s1 === s2) return 1.0
+
+  // One contains the other
+  if (s1.includes(s2) || s2.includes(s1)) {
+    return 0.9
+  }
+
+  // Levenshtein distance for fuzzy matching
+  const longer = s1.length > s2.length ? s1 : s2
+  const shorter = s1.length > s2.length ? s2 : s1
+
+  if (longer.length === 0) return 1.0
+
+  const editDistance = levenshteinDistance(longer, shorter)
+  return (longer.length - editDistance) / longer.length
+}
+
+/**
+ * Calculate Levenshtein distance between two strings
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix: number[][] = []
+
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i]
+  }
+
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j
+  }
+
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        )
+      }
+    }
+  }
+
+  return matrix[str2.length][str1.length]
+}
+
+/**
+ * Quick column matching using common mappings and fuzzy matching
  */
 export function quickMatchColumns(
   sourceColumns: string[],
   targetColumns: string[]
 ): Array<{ source: string; target: string; confidence: number; method: 'exact' | 'common' }> {
   const matches: Array<{ source: string; target: string; confidence: number; method: 'exact' | 'common' }> = []
+  const usedTargets = new Set<string>()
 
   sourceColumns.forEach(sourceCol => {
     const sourceLower = sourceCol.toLowerCase().trim()
+    let bestMatch: { target: string; confidence: number; method: 'exact' | 'common' } | null = null
 
-    // Check for exact matches
+    // 1. Check for exact matches first
     const exactMatch = targetColumns.find(targetCol =>
-      targetCol.toLowerCase().trim() === sourceLower
+      !usedTargets.has(targetCol) && targetCol.toLowerCase().trim() === sourceLower
     )
 
     if (exactMatch) {
-      matches.push({
-        source: sourceCol,
+      bestMatch = {
         target: exactMatch,
         confidence: 100,
         method: 'exact'
-      })
-      return
+      }
     }
 
-    // Check common mappings
-    for (const [, variations] of Object.entries(COMMON_COLUMN_MAPPINGS)) {
-      const sourceMatches = variations.some(v => sourceLower.includes(v.toLowerCase()))
+    // 2. Check common mappings
+    if (!bestMatch) {
+      for (const [, variations] of Object.entries(COMMON_COLUMN_MAPPINGS)) {
+        const sourceMatches = variations.some(v => sourceLower.includes(v.toLowerCase()))
 
-      if (sourceMatches) {
-        const targetMatch = targetColumns.find(targetCol => {
-          const targetLower = targetCol.toLowerCase().trim()
-          return variations.some(v => targetLower.includes(v.toLowerCase()))
-        })
-
-        if (targetMatch) {
-          matches.push({
-            source: sourceCol,
-            target: targetMatch,
-            confidence: 85,
-            method: 'common'
+        if (sourceMatches) {
+          const targetMatch = targetColumns.find(targetCol => {
+            if (usedTargets.has(targetCol)) return false
+            const targetLower = targetCol.toLowerCase().trim()
+            return variations.some(v => targetLower.includes(v.toLowerCase()))
           })
-          return
+
+          if (targetMatch) {
+            bestMatch = {
+              target: targetMatch,
+              confidence: 90,
+              method: 'common'
+            }
+            break
+          }
         }
       }
+    }
+
+    // 3. Fuzzy string matching for high similarity (threshold: 0.8)
+    if (!bestMatch) {
+      let maxSimilarity = 0
+      let similarTarget: string | null = null
+
+      targetColumns.forEach(targetCol => {
+        if (usedTargets.has(targetCol)) return
+
+        const similarity = calculateSimilarity(sourceLower, targetCol)
+        if (similarity > maxSimilarity && similarity >= 0.8) {
+          maxSimilarity = similarity
+          similarTarget = targetCol
+        }
+      })
+
+      if (similarTarget && maxSimilarity >= 0.8) {
+        bestMatch = {
+          target: similarTarget,
+          confidence: Math.round(maxSimilarity * 100),
+          method: 'common'
+        }
+      }
+    }
+
+    // Add the best match if found
+    if (bestMatch) {
+      matches.push({
+        source: sourceCol,
+        target: bestMatch.target,
+        confidence: bestMatch.confidence,
+        method: bestMatch.method
+      })
+      usedTargets.add(bestMatch.target)
     }
   })
 
