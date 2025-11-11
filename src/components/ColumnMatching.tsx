@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Zap, Check, X, ArrowRight, AlertCircle, Sparkles } from 'lucide-react'
+import { Zap, Check, X, ArrowRight, AlertCircle, Sparkles, PlusCircle } from 'lucide-react'
 import { Project, ColumnMatch, ColumnMatchingResult } from '../types'
 import { matchColumnsWithLLM, quickMatchColumns } from '../services/llm'
 
@@ -153,6 +153,54 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
     }
 
     setMatches([...matches, newMatch])
+  }
+
+  const handleCreateNewColumn = (sourceCol: string) => {
+    const newColumnName = prompt(
+      `Create a new column in the target database for "${sourceCol}".\n\nEnter the name for the new column:`,
+      sourceCol
+    )
+
+    if (!newColumnName || !newColumnName.trim()) {
+      return
+    }
+
+    const trimmedName = newColumnName.trim()
+
+    // Check if column already exists
+    if (targetDb?.columns.some(c => c.name === trimmedName)) {
+      alert(`Column "${trimmedName}" already exists in the target database.`)
+      return
+    }
+
+    // Add new column to target database
+    if (targetDb) {
+      const newColumn = {
+        name: trimmedName,
+        index: targetDb.columns.length,
+        dataType: 'string' as const,
+        sampleValues: []
+      }
+
+      const updatedTargetDb = {
+        ...targetDb,
+        columns: [...targetDb.columns, newColumn]
+      }
+
+      // Update project with new target database
+      const updatedProject = {
+        ...project,
+        targetDatabase: updatedTargetDb,
+        updatedAt: new Date()
+      }
+
+      onUpdate(updatedProject)
+
+      // Create automatic match
+      handleManualMatch(sourceCol, trimmedName)
+
+      alert(`New column "${trimmedName}" created in target database and matched with "${sourceCol}".`)
+    }
   }
 
   const handleRemoveMatch = (match: ColumnMatch) => {
@@ -360,21 +408,32 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
               <label className="label">Source Column (Index DB)</label>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {unmatchedSource.map(col => (
-                  <button
-                    key={col}
-                    onClick={() => {
-                      const target = prompt(`Match "${col}" to which target column?`)
-                      if (target && unmatchedTarget.includes(target)) {
-                        handleManualMatch(col, target)
-                      }
-                    }}
-                    className="w-full text-left p-3 border border-gray-200 rounded hover:border-primary-400 hover:bg-primary-50 transition-colors"
-                  >
-                    <p className="font-medium text-gray-900">{col}</p>
-                    <p className="text-xs text-gray-500">Click to match</p>
-                  </button>
+                  <div key={col} className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        const target = prompt(`Match "${col}" to which target column?`)
+                        if (target && unmatchedTarget.includes(target)) {
+                          handleManualMatch(col, target)
+                        }
+                      }}
+                      className="flex-1 text-left p-3 border border-gray-200 rounded hover:border-primary-400 hover:bg-primary-50 transition-colors"
+                    >
+                      <p className="font-medium text-gray-900">{col}</p>
+                      <p className="text-xs text-gray-500">Click to match</p>
+                    </button>
+                    <button
+                      onClick={() => handleCreateNewColumn(col)}
+                      className="px-3 py-2 border-2 border-green-200 bg-green-50 text-green-700 rounded hover:bg-green-100 hover:border-green-300 transition-colors flex items-center"
+                      title="Create new column in target database"
+                    >
+                      <PlusCircle className="h-5 w-5" />
+                    </button>
+                  </div>
                 ))}
               </div>
+              <p className="text-xs text-gray-600 mt-2">
+                💡 Click <PlusCircle className="h-3 w-3 inline" /> to create a new column in the target database
+              </p>
             </div>
             <div>
               <label className="label">Target Column (Target DB)</label>
