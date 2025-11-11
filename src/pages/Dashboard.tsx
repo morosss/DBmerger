@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { FolderPlus, Folders, Database, TrendingUp } from 'lucide-react'
+import { FolderPlus, Folders, Database, TrendingUp, CheckCircle, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { getProjects } from '../services/storage'
 import { Project } from '../types'
@@ -26,6 +26,12 @@ export default function Dashboard() {
     })
   }
 
+  // Configuration status
+  const apiKeyConfigured = !!import.meta.env.VITE_ANTHROPIC_API_KEY
+  const taviDbConfigured = !!import.meta.env.VITE_TAVI_DATABASE_URL
+  const mteerDbConfigured = !!import.meta.env.VITE_MTEER_DATABASE_URL
+  const allConfigured = apiKeyConfigured && taviDbConfigured && mteerDbConfigured
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -35,6 +41,50 @@ export default function Dashboard() {
           Welcome to DBmerger - Manage your cardiovascular study databases
         </p>
       </div>
+
+      {/* Configuration Status */}
+      {!allConfigured && (
+        <div className="card bg-yellow-50 border-yellow-200">
+          <h3 className="font-semibold text-yellow-900 mb-3">⚙️ Configuration Status</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center">
+              {apiKeyConfigured ? (
+                <CheckCircle className="h-4 w-4 text-green-600 mr-2" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-600 mr-2" />
+              )}
+              <span className={apiKeyConfigured ? 'text-green-800' : 'text-red-800'}>
+                Anthropic API Key {apiKeyConfigured ? '✓' : '✗'}
+              </span>
+            </div>
+            <div className="flex items-center">
+              {taviDbConfigured ? (
+                <CheckCircle className="h-4 w-4 text-green-600 mr-2" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-600 mr-2" />
+              )}
+              <span className={taviDbConfigured ? 'text-green-800' : 'text-red-800'}>
+                TAVI Database URL {taviDbConfigured ? '✓' : '✗'}
+              </span>
+            </div>
+            <div className="flex items-center">
+              {mteerDbConfigured ? (
+                <CheckCircle className="h-4 w-4 text-green-600 mr-2" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-600 mr-2" />
+              )}
+              <span className={mteerDbConfigured ? 'text-green-800' : 'text-red-800'}>
+                M-TEER Database URL {mteerDbConfigured ? '✓' : '✗'}
+              </span>
+            </div>
+            {!allConfigured && (
+              <p className="mt-3 text-xs text-yellow-800">
+                ℹ️ Some environment variables are missing. Check GitHub Secrets configuration.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
