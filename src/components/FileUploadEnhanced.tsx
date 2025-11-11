@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Cloud } from 'lucide-react'
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Cloud, X } from 'lucide-react'
 import { Project } from '../types'
 import { parseFile } from '../services/parser'
 import { getPredefinedDatabases, importPredefinedDatabase } from '../services/googleSheets'
@@ -65,6 +65,23 @@ export default function FileUploadEnhanced({ project, onUpdate }: FileUploadEnha
       setIndexFile(null)
     } finally {
       setLoadingPredefined(false)
+    }
+  }
+
+  const handleRemoveIndexFile = () => {
+    setIndexFile(null)
+    setSelectedPredefined('')
+    setError('')
+    if (indexInputRef.current) {
+      indexInputRef.current.value = ''
+    }
+  }
+
+  const handleRemoveTargetFile = () => {
+    setTargetFile(null)
+    setError('')
+    if (targetInputRef.current) {
+      targetInputRef.current.value = ''
     }
   }
 
@@ -214,12 +231,24 @@ export default function FileUploadEnhanced({ project, onUpdate }: FileUploadEnha
               )}
 
               {indexFile && !loadingPredefined && (
-                <div className="flex items-center p-4 bg-green-50 border border-green-200 rounded-lg">
-                  <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
-                  <div>
-                    <p className="font-medium text-green-900">{indexFile.name}</p>
-                    <p className="text-sm text-green-700">Ready to upload</p>
+                <div className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center">
+                    <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
+                    <div>
+                      <p className="font-medium text-green-900">{indexFile.name}</p>
+                      <p className="text-sm text-green-700">Ready to upload</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleRemoveIndexFile()
+                    }}
+                    className="p-2 hover:bg-green-100 rounded-full transition-colors"
+                    title="Remove file"
+                  >
+                    <X className="h-5 w-5 text-green-700" />
+                  </button>
                 </div>
               )}
             </div>
@@ -255,12 +284,24 @@ export default function FileUploadEnhanced({ project, onUpdate }: FileUploadEnha
                   </div>
                 </div>
               ) : indexFile ? (
-                <div className="flex items-center justify-center">
-                  <FileSpreadsheet className="h-8 w-8 text-primary-600 mr-3" />
-                  <div className="text-left">
-                    <p className="font-medium text-gray-900">{indexFile.name}</p>
-                    <p className="text-sm text-gray-600">Ready to upload</p>
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center">
+                    <FileSpreadsheet className="h-8 w-8 text-primary-600 mr-3" />
+                    <div className="text-left">
+                      <p className="font-medium text-gray-900">{indexFile.name}</p>
+                      <p className="text-sm text-gray-600">Ready to upload</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleRemoveIndexFile()
+                    }}
+                    className="p-2 hover:bg-red-100 rounded-full transition-colors"
+                    title="Remove file"
+                  >
+                    <X className="h-5 w-5 text-red-600" />
+                  </button>
                 </div>
               ) : (
                 <div>
@@ -321,12 +362,24 @@ export default function FileUploadEnhanced({ project, onUpdate }: FileUploadEnha
                 </div>
               </div>
             ) : targetFile ? (
-              <div className="flex items-center justify-center">
-                <FileSpreadsheet className="h-8 w-8 text-primary-600 mr-3" />
-                <div className="text-left">
-                  <p className="font-medium text-gray-900">{targetFile.name}</p>
-                  <p className="text-sm text-gray-600">Ready to upload</p>
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center">
+                  <FileSpreadsheet className="h-8 w-8 text-primary-600 mr-3" />
+                  <div className="text-left">
+                    <p className="font-medium text-gray-900">{targetFile.name}</p>
+                    <p className="text-sm text-gray-600">Ready to upload</p>
+                  </div>
                 </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleRemoveTargetFile()
+                  }}
+                  className="p-2 hover:bg-red-100 rounded-full transition-colors"
+                  title="Remove file"
+                >
+                  <X className="h-5 w-5 text-red-600" />
+                </button>
               </div>
             ) : (
               <div>
