@@ -77,13 +77,34 @@ OUTPUT FORMAT (JSON array only):
 
     const responseText = message.content[0].type === 'text' ? message.content[0].text : ''
 
-    // Extract JSON from response
-    const jsonMatch = responseText.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) {
-      throw new Error('Failed to parse LLM response')
+    // Extract JSON from response - handle multiple formats
+    let jsonText = ''
+
+    // Try to extract from markdown code block first
+    const codeBlockMatch = responseText.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/)
+    if (codeBlockMatch) {
+      jsonText = codeBlockMatch[1]
+    } else {
+      // Try to find JSON array directly
+      const jsonMatch = responseText.match(/\[[\s\S]*\]/)
+      if (jsonMatch) {
+        jsonText = jsonMatch[0]
+      }
     }
 
-    const matches = JSON.parse(jsonMatch[0])
+    if (!jsonText) {
+      console.error('LLM Response:', responseText)
+      throw new Error('Failed to parse LLM response: No JSON array found')
+    }
+
+    let matches
+    try {
+      matches = JSON.parse(jsonText)
+    } catch (parseError) {
+      console.error('JSON Parse Error:', parseError)
+      console.error('Attempted to parse:', jsonText)
+      throw new Error('Failed to parse LLM response: Invalid JSON format')
+    }
 
     return {
       matches: matches.map((m: any) => ({
