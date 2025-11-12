@@ -19,134 +19,116 @@ function getClient(): Anthropic {
 }
 
 /**
- * Use Claude Haiku to match columns between source and target databases
+ * Use Claude Haiku to match columns between source and target databases (optimized for token usage)
  */
 export async function matchColumnsWithLLM(
   request: LLMColumnMatchRequest
 ): Promise<LLMColumnMatchResponse> {
   const client = getClient()
 
-  const prompt = `You are an expert in clinical cardiovascular research data management, specializing in TAVI (Transcatheter Aortic Valve Implantation) and M-TEER (Mitral Transcatheter Edge-to-Edge Repair) procedures.
+  // OPTIMIZATION 1: Pre-filter using quick matching to reduce LLM workload
+  const quickMatches = quickMatchColumns(request.sourceColumns, request.targetColumns)
+  const quickMatchedSources = new Set(quickMatches.map(m => m.source))
+  const quickMatchedTargets = new Set(quickMatches.map(m => m.target))
 
-Your task is to match column names between two clinical databases with high precision, considering medical terminology, multilingual variations, and common abbreviations used in interventional cardiology.
+  // Only send unmatched columns to LLM
+  const unmatchedSource = request.sourceColumns.filter(col => !quickMatchedSources.has(col))
+  const unmatchedTarget = request.targetColumns.filter(col => !quickMatchedTargets.has(col))
 
-SOURCE DATABASE COLUMNS:
-${request.sourceColumns.map((col, i) => `${i + 1}. ${col}`).join('\n')}
+  console.log(`Quick matching: ${quickMatches.length} matches found`)
+  console.log(`Remaining for LLM: ${unmatchedSource.length} source, ${unmatchedTarget.length} target`)
 
-TARGET DATABASE COLUMNS:
-${request.targetColumns.map((col, i) => `${i + 1}. ${col}`).join('\n')}
-
-${request.context ? `\nCLINICAL CONTEXT: ${request.context}` : ''}
-
-MATCHING GUIDELINES:
-• Patient Identifiers: ID, patient_id, paziente_id, numero_paziente, record_number
-• Demographics: age/età, sex/sesso/gender, DOB/data_nascita, weight/peso, height/altezza, BMI
-• Dates: procedure_date/data_procedura, admission/ricovero, discharge/dimissione, follow_up dates
-• TAVI-specific: valve_type/tipo_valvola (Sapien, Evolut, Navitor, Acurate), valve_size/dimensione, access_site/via_accesso (transfemoral/TF, transapical/TA, transaortic/TAo)
-• M-TEER-specific: clip_type/tipo_clip (MitraClip, PASCAL), number_of_clips/numero_clip, leaflet insertion
-• Outcomes: mortality/mortalità/morte, stroke/ictus, MI/infarto/IMA, bleeding/sanguinamento, vascular complications/complicanze_vascolari
-• Echo parameters: LVEF/FE, gradient/gradiente, AR/rigurgito_aortico, MR/rigurgito_mitralico
-• Lab values: creatinine/creatinina, hemoglobin/emoglobina, NT-proBNP, troponin/troponina
-
-CRITICAL RULES:
-1. Match EXACT column names from the lists above (preserve case, spaces, underscores)
-2. Consider Italian-English translations (età=age, sesso=sex, morte=death)
-3. Recognize medical abbreviations (FE=LVEF, IMA=MI, TA=transapical)
-4. Only return matches with confidence >70%
-5. Prefer exact matches over semantic matches
-6. Keep reasoning VERY brief (2-4 words max) to handle large column lists
-
-IMPORTANT: Return ONLY the JSON array in your response. Do not include any explanatory text, markdown formatting, or other content. Just the raw JSON array starting with [ and ending with ].
-
-OUTPUT FORMAT:
-[
-  {
-    "source": "exact_column_name_from_source",
-    "target": "exact_column_name_from_target",
-    "confidence": 95,
-    "reasoning": "Exact match"
-  }
-]`
-
-  try {
-    const message = await client.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 100000, // Set to maximum to handle databases with 400+ columns
-      messages: [{
-        role: 'user',
-        content: prompt
-      }]
-    })
-
-    const responseText = message.content[0].type === 'text' ? message.content[0].text : ''
-    console.log('Full LLM Response:', responseText)
-    console.log('Response stop_reason:', message.stop_reason)
-
-    // Check if response was truncated
-    if (message.stop_reason === 'max_tokens') {
-      console.warn('Response was truncated due to max_tokens limit')
-    }
-
-    // Extract JSON from response - handle multiple formats
-    let jsonText = ''
-    let matches: any[] = []
-
-    // Strategy 1: Extract from markdown code block
-    const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
-    if (codeBlockMatch) {
-      jsonText = codeBlockMatch[1].trim()
-      console.log('Extracted from code block:', jsonText.substring(0, 200) + '...')
-    } else {
-      // Strategy 2: Find JSON array directly (get the outermost array)
-      const firstBracket = responseText.indexOf('[')
-      const lastBracket = responseText.lastIndexOf(']')
-
-      if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-        jsonText = responseText.substring(firstBracket, lastBracket + 1)
-        console.log('Extracted array from position', firstBracket, 'to', lastBracket)
-        console.log('Extracted JSON preview:', jsonText.substring(0, 200) + '...')
-      }
-    }
-
-    if (jsonText) {
-      try {
-        const parsed = JSON.parse(jsonText)
-
-        // Handle if it's wrapped in an object with a "matches" property
-        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.matches)) {
-          matches = parsed.matches
-        } else if (Array.isArray(parsed)) {
-          matches = parsed
-        } else {
-          console.error('Parsed JSON is not an array:', parsed)
-          throw new Error('Parsed JSON is not in expected format')
-        }
-      } catch (parseError) {
-        console.error('JSON Parse Error:', parseError)
-        console.error('Attempted to parse:', jsonText.substring(0, 500))
-        throw new Error(`Failed to parse LLM response: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`)
-      }
-    }
-
-    // Fallback: if we still don't have matches, return empty array and let quick matching handle it
-    if (!matches || matches.length === 0) {
-      console.warn('No valid JSON matches found in response, using fallback')
-      console.log('Response preview:', responseText.substring(0, 500))
-      throw new Error('Failed to parse LLM response: No JSON array found in response')
-    }
-
+  // If no unmatched columns, return quick matches
+  if (unmatchedSource.length === 0 || unmatchedTarget.length === 0) {
     return {
-      matches: matches.map((m: any) => ({
+      matches: quickMatches.map(m => ({
         source: m.source,
         target: m.target,
         confidence: m.confidence,
-        reasoning: m.reasoning
+        reasoning: m.method === 'exact' ? 'Exact match' : 'Common pattern'
       }))
     }
-  } catch (error) {
-    console.error('LLM column matching failed:', error)
-    throw new Error(`Failed to match columns with AI: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
+
+  // OPTIMIZATION 2: Batch processing for very large column lists
+  const BATCH_SIZE = 100
+  const allLLMMatches: Array<{ source: string; target: string; confidence: number }> = []
+
+  for (let i = 0; i < unmatchedSource.length; i += BATCH_SIZE) {
+    const sourceBatch = unmatchedSource.slice(i, i + BATCH_SIZE)
+
+    // OPTIMIZATION 3: Compact prompt with minimal examples
+    const prompt = `Match medical database columns. Consider Italian/English terms and abbreviations.
+
+SOURCE: ${sourceBatch.join(', ')}
+TARGET: ${unmatchedTarget.join(', ')}
+
+Common patterns: age/età, sex/sesso, ID/paziente_id, LVEF/FE, mortality/morte, TAVI valve types, M-TEER clips.
+
+Return ONLY JSON array (no markdown). Match exact names. Min confidence: 70.
+
+[{"source":"col_name","target":"col_name","confidence":85}]`
+
+    try {
+      const message = await client.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 50000, // Reduced from 100K since we're batching
+        messages: [{
+          role: 'user',
+          content: prompt
+        }]
+      })
+
+      const responseText = message.content[0].type === 'text' ? message.content[0].text : ''
+      console.log(`LLM Response for batch ${Math.floor(i / BATCH_SIZE) + 1}:`, responseText.substring(0, 200))
+
+      if (message.stop_reason === 'max_tokens') {
+        console.warn(`Batch ${Math.floor(i / BATCH_SIZE) + 1} truncated - consider smaller batch size`)
+      }
+
+      // Extract JSON
+      let jsonText = ''
+      const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+      if (codeBlockMatch) {
+        jsonText = codeBlockMatch[1].trim()
+      } else {
+        const firstBracket = responseText.indexOf('[')
+        const lastBracket = responseText.lastIndexOf(']')
+        if (firstBracket !== -1 && lastBracket !== -1) {
+          jsonText = responseText.substring(firstBracket, lastBracket + 1)
+        }
+      }
+
+      if (jsonText) {
+        const parsed = JSON.parse(jsonText)
+        const batchMatches = Array.isArray(parsed) ? parsed : (parsed.matches || [])
+        allLLMMatches.push(...batchMatches)
+      }
+    } catch (error) {
+      console.error(`Batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`, error)
+      // Continue with next batch instead of failing completely
+    }
+  }
+
+  // Combine quick matches and LLM matches
+  const combinedMatches = [
+    ...quickMatches.map(m => ({
+      source: m.source,
+      target: m.target,
+      confidence: m.confidence,
+      reasoning: m.method === 'exact' ? 'Exact match' : 'Common pattern'
+    })),
+    ...allLLMMatches.map((m: any) => ({
+      source: m.source,
+      target: m.target,
+      confidence: m.confidence,
+      reasoning: m.reasoning || 'AI match'
+    }))
+  ]
+
+  console.log(`Total matches: ${combinedMatches.length} (${quickMatches.length} quick + ${allLLMMatches.length} AI)`)
+
+  return { matches: combinedMatches }
 }
 
 /**
@@ -191,54 +173,132 @@ export const COMMON_COLUMN_MAPPINGS: Record<string, string[]> = {
 }
 
 /**
- * Quick column matching using common mappings
+ * Quick column matching using common mappings (optimized with fuzzy matching)
  */
 export function quickMatchColumns(
   sourceColumns: string[],
   targetColumns: string[]
 ): Array<{ source: string; target: string; confidence: number; method: 'exact' | 'common' }> {
   const matches: Array<{ source: string; target: string; confidence: number; method: 'exact' | 'common' }> = []
+  const matchedTargets = new Set<string>()
 
   sourceColumns.forEach(sourceCol => {
     const sourceLower = sourceCol.toLowerCase().trim()
 
-    // Check for exact matches
+    // Strategy 1: Exact match (case-insensitive)
     const exactMatch = targetColumns.find(targetCol =>
-      targetCol.toLowerCase().trim() === sourceLower
+      !matchedTargets.has(targetCol) && targetCol.toLowerCase().trim() === sourceLower
     )
 
     if (exactMatch) {
-      matches.push({
-        source: sourceCol,
-        target: exactMatch,
-        confidence: 100,
-        method: 'exact'
-      })
+      matches.push({ source: sourceCol, target: exactMatch, confidence: 100, method: 'exact' })
+      matchedTargets.add(exactMatch)
       return
     }
 
-    // Check common mappings
-    for (const [, variations] of Object.entries(COMMON_COLUMN_MAPPINGS)) {
-      const sourceMatches = variations.some(v => sourceLower.includes(v.toLowerCase()))
+    // Strategy 2: Normalized exact match (remove special chars, spaces)
+    const sourceNorm = sourceLower.replace(/[_\s-]/g, '')
+    const normMatch = targetColumns.find(targetCol => {
+      if (matchedTargets.has(targetCol)) return false
+      const targetNorm = targetCol.toLowerCase().trim().replace(/[_\s-]/g, '')
+      return targetNorm === sourceNorm
+    })
 
-      if (sourceMatches) {
+    if (normMatch) {
+      matches.push({ source: sourceCol, target: normMatch, confidence: 95, method: 'exact' })
+      matchedTargets.add(normMatch)
+      return
+    }
+
+    // Strategy 3: Common medical term mappings
+    for (const [, variations] of Object.entries(COMMON_COLUMN_MAPPINGS)) {
+      if (variations.some(v => sourceLower.includes(v.toLowerCase()))) {
         const targetMatch = targetColumns.find(targetCol => {
+          if (matchedTargets.has(targetCol)) return false
           const targetLower = targetCol.toLowerCase().trim()
           return variations.some(v => targetLower.includes(v.toLowerCase()))
         })
 
         if (targetMatch) {
-          matches.push({
-            source: sourceCol,
-            target: targetMatch,
-            confidence: 85,
-            method: 'common'
-          })
+          matches.push({ source: sourceCol, target: targetMatch, confidence: 85, method: 'common' })
+          matchedTargets.add(targetMatch)
           return
         }
       }
     }
+
+    // Strategy 4: High similarity fuzzy match (>85% similar)
+    const bestMatch = targetColumns
+      .filter(t => !matchedTargets.has(t))
+      .map(targetCol => ({
+        col: targetCol,
+        similarity: calculateSimilarity(sourceLower, targetCol.toLowerCase())
+      }))
+      .filter(m => m.similarity > 0.85)
+      .sort((a, b) => b.similarity - a.similarity)[0]
+
+    if (bestMatch) {
+      matches.push({
+        source: sourceCol,
+        target: bestMatch.col,
+        confidence: Math.round(bestMatch.similarity * 100),
+        method: 'common'
+      })
+      matchedTargets.add(bestMatch.col)
+    }
   })
 
   return matches
+}
+
+/**
+ * Calculate string similarity using Levenshtein distance
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const s1 = str1.toLowerCase().trim()
+  const s2 = str2.toLowerCase().trim()
+
+  if (s1 === s2) return 1.0
+  if (s1.includes(s2) || s2.includes(s1)) {
+    return Math.max(s2.length / s1.length, s1.length / s2.length) * 0.95
+  }
+
+  const longer = s1.length > s2.length ? s1 : s2
+  const shorter = s1.length > s2.length ? s2 : s1
+
+  if (longer.length === 0) return 1.0
+
+  const editDistance = levenshteinDistance(longer, shorter)
+  return (longer.length - editDistance) / longer.length
+}
+
+/**
+ * Compute Levenshtein distance between two strings
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix: number[][] = []
+
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i]
+  }
+
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j
+  }
+
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        )
+      }
+    }
+  }
+
+  return matrix[str2.length][str1.length]
 }
