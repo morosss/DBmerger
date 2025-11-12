@@ -54,6 +54,7 @@ CRITICAL RULES:
 3. Recognize medical abbreviations (FE=LVEF, IMA=MI, TA=transapical)
 4. Only return matches with confidence >70%
 5. Prefer exact matches over semantic matches
+6. Keep reasoning VERY brief (2-4 words max) to handle large column lists
 
 IMPORTANT: Return ONLY the JSON array in your response. Do not include any explanatory text, markdown formatting, or other content. Just the raw JSON array starting with [ and ending with ].
 
@@ -63,14 +64,14 @@ OUTPUT FORMAT:
     "source": "exact_column_name_from_source",
     "target": "exact_column_name_from_target",
     "confidence": 95,
-    "reasoning": "Brief reason"
+    "reasoning": "Exact match"
   }
 ]`
 
   try {
     const message = await client.messages.create({
       model: 'claude-haiku-4-5',
-      max_tokens: 16384, // Increased to handle large column lists
+      max_tokens: 100000, // Set to maximum to handle databases with 400+ columns
       messages: [{
         role: 'user',
         content: prompt
