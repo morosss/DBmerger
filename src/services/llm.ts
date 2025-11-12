@@ -20,25 +20,32 @@ function getClient(): Anthropic {
 
 /**
  * Use Claude Haiku to match columns between source and target databases (optimized for token usage)
+ * @param confidenceThreshold - Only send matches below this confidence to LLM for refinement (0-100)
  */
 export async function matchColumnsWithLLM(
-  request: LLMColumnMatchRequest
+  request: LLMColumnMatchRequest,
+  confidenceThreshold: number = 100
 ): Promise<LLMColumnMatchResponse> {
   const client = getClient()
 
   // OPTIMIZATION 1: Pre-filter using quick matching to reduce LLM workload
   const quickMatches = quickMatchColumns(request.sourceColumns, request.targetColumns)
-  const quickMatchedSources = new Set(quickMatches.map(m => m.source))
-  const quickMatchedTargets = new Set(quickMatches.map(m => m.target))
 
-  // Only send unmatched columns to LLM
+  // Separate high-confidence matches (keep as-is) from low-confidence matches (refine with LLM)
+  const highConfidenceMatches = quickMatches.filter(m => m.confidence >= confidenceThreshold)
+  const lowConfidenceMatches = quickMatches.filter(m => m.confidence < confidenceThreshold)
+
+  const quickMatchedSources = new Set(highConfidenceMatches.map(m => m.source))
+  const quickMatchedTargets = new Set(highConfidenceMatches.map(m => m.target))
+
+  // Send to LLM: unmatched columns + low-confidence matches for refinement
   const unmatchedSource = request.sourceColumns.filter(col => !quickMatchedSources.has(col))
   const unmatchedTarget = request.targetColumns.filter(col => !quickMatchedTargets.has(col))
 
-  console.log(`Quick matching: ${quickMatches.length} matches found`)
-  console.log(`Remaining for LLM: ${unmatchedSource.length} source, ${unmatchedTarget.length} target`)
+  console.log(`Quick matching: ${quickMatches.length} total (${highConfidenceMatches.length} high-confidence ≥${confidenceThreshold}%, ${lowConfidenceMatches.length} low-confidence)`)
+  console.log(`Sending to LLM for refinement: ${unmatchedSource.length} source, ${unmatchedTarget.length} target`)
 
-  // If no unmatched columns, return quick matches
+  // If no columns need LLM processing, return quick matches
   if (unmatchedSource.length === 0 || unmatchedTarget.length === 0) {
     return {
       matches: quickMatches.map(m => ({
@@ -110,9 +117,9 @@ Return ONLY JSON array (no markdown). Match exact names. Min confidence: 70.
     }
   }
 
-  // Combine quick matches and LLM matches
+  // Combine high-confidence quick matches with LLM results (which may improve low-confidence matches)
   const combinedMatches = [
-    ...quickMatches.map(m => ({
+    ...highConfidenceMatches.map(m => ({
       source: m.source,
       target: m.target,
       confidence: m.confidence,
@@ -122,11 +129,11 @@ Return ONLY JSON array (no markdown). Match exact names. Min confidence: 70.
       source: m.source,
       target: m.target,
       confidence: m.confidence,
-      reasoning: m.reasoning || 'AI match'
+      reasoning: m.reasoning || 'AI refined'
     }))
   ]
 
-  console.log(`Total matches: ${combinedMatches.length} (${quickMatches.length} quick + ${allLLMMatches.length} AI)`)
+  console.log(`Total matches: ${combinedMatches.length} (${highConfidenceMatches.length} high-confidence quick + ${allLLMMatches.length} AI refined)`)
 
   return { matches: combinedMatches }
 }

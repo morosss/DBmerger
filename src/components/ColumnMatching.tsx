@@ -17,6 +17,7 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
   const [unmatchedTarget, setUnmatchedTarget] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [confidenceThreshold, setConfidenceThreshold] = useState(100)
 
   const indexDb = project.indexDatabase
   const targetDb = project.targetDatabase
@@ -74,46 +75,31 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
       const sourceColumns = indexDb.columns.map(c => c.name)
       const targetColumns = targetDb.columns.map(c => c.name)
 
-      // First try quick matches
-      const quickMatches = quickMatchColumns(sourceColumns, targetColumns)
-      const matchedSources = new Set(quickMatches.map(m => m.source))
-      const matchedTargets = new Set(quickMatches.map(m => m.target))
-
-      // Get unmatched columns for AI
-      const unmatchedSourceCols = sourceColumns.filter(c => !matchedSources.has(c))
-      const unmatchedTargetCols = targetColumns.filter(c => !matchedTargets.has(c))
-
-      if (unmatchedSourceCols.length === 0 || unmatchedTargetCols.length === 0) {
-        // No need for AI, quick match covered everything
-        handleQuickMatch()
-        return
-      }
-
-      // Use AI for unmatched columns
+      // Use AI with confidence threshold (it handles quick matching internally)
       const aiResult = await matchColumnsWithLLM({
-        sourceColumns: unmatchedSourceCols,
-        targetColumns: unmatchedTargetCols,
+        sourceColumns,
+        targetColumns,
         context: `Medical database for cardiovascular procedures (TAVI, M-TEER).
                  Source is the index database, target is the study template.`
-      })
+      }, confidenceThreshold)
 
-      // Combine quick matches with AI matches
-      const allMatches: ColumnMatch[] = [
-        ...quickMatches.map(m => ({
+      // Convert LLM results to ColumnMatch format
+      const allMatches: ColumnMatch[] = aiResult.matches.map(m => {
+        let method: 'exact' | 'common' | 'llm' | 'manual' = 'common'
+        if (m.reasoning?.includes('Exact')) {
+          method = 'exact'
+        } else if (m.reasoning?.includes('AI') || m.reasoning?.includes('refined')) {
+          method = 'llm'
+        }
+
+        return {
           sourceColumn: m.source,
           targetColumn: m.target,
           confidence: m.confidence,
-          method: m.method,
+          method,
           verified: false
-        })),
-        ...aiResult.matches.map(m => ({
-          sourceColumn: m.source,
-          targetColumn: m.target,
-          confidence: m.confidence,
-          method: 'llm' as const,
-          verified: false
-        }))
-      ]
+        }
+      })
 
       const allMatchedSources = new Set(allMatches.map(m => m.sourceColumn))
       const allMatchedTargets = new Set(allMatches.map(m => m.targetColumn))
@@ -264,6 +250,60 @@ export default function ColumnMatching({ project, onUpdate, onNext }: ColumnMatc
         <p className="text-gray-600">
           Map columns from your index database to the target database template
         </p>
+      </div>
+
+      {/* AI Confidence Threshold Slider */}
+      <div className="card bg-gradient-to-r from-purple-50 to-blue-50 border-purple-200">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h3 className="font-semibold text-gray-900 flex items-center">
+              <Sparkles className="h-5 w-5 mr-2 text-purple-600" />
+              AI Refinement Threshold
+            </h3>
+            <p className="text-sm text-gray-600 mt-1">
+              Send matches below this confidence level to AI for refinement
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-3xl font-bold text-purple-600">{confidenceThreshold}%</div>
+            <div className="text-xs text-gray-500 mt-1">
+              {confidenceThreshold === 100 ? 'All matches' : confidenceThreshold === 0 ? 'None' : `<${confidenceThreshold}%`}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={confidenceThreshold}
+            onChange={(e) => setConfidenceThreshold(Number(e.target.value))}
+            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+            style={{
+              background: `linear-gradient(to right, #9333ea 0%, #9333ea ${confidenceThreshold}%, #e5e7eb ${confidenceThreshold}%, #e5e7eb 100%)`
+            }}
+          />
+          <div className="flex justify-between text-xs text-gray-500">
+            <span>0% - No AI</span>
+            <span>50% - Balanced</span>
+            <span>100% - All matches</span>
+          </div>
+        </div>
+
+        <div className="mt-3 p-3 bg-white bg-opacity-60 rounded-lg border border-purple-200">
+          <p className="text-sm text-gray-700">
+            <strong>💡 How it works:</strong>
+            {confidenceThreshold === 100 ? (
+              <span className="text-purple-800"> All quick matches will be sent to AI for verification and potential improvement.</span>
+            ) : confidenceThreshold === 0 ? (
+              <span className="text-purple-800"> No quick matches will be sent to AI. Only completely unmatched columns will use AI.</span>
+            ) : (
+              <span className="text-purple-800"> Quick matches with confidence below {confidenceThreshold}% will be refined by AI, while higher confidence matches are kept as-is.</span>
+            )}
+          </p>
+        </div>
       </div>
 
       {/* Matching Controls */}
