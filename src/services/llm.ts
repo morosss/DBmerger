@@ -70,7 +70,7 @@ OUTPUT FORMAT:
   try {
     const message = await client.messages.create({
       model: 'claude-haiku-4-5',
-      max_tokens: 4096,
+      max_tokens: 16384, // Increased to handle large column lists
       messages: [{
         role: 'user',
         content: prompt
@@ -79,6 +79,12 @@ OUTPUT FORMAT:
 
     const responseText = message.content[0].type === 'text' ? message.content[0].text : ''
     console.log('Full LLM Response:', responseText)
+    console.log('Response stop_reason:', message.stop_reason)
+
+    // Check if response was truncated
+    if (message.stop_reason === 'max_tokens') {
+      console.warn('Response was truncated due to max_tokens limit')
+    }
 
     // Extract JSON from response - handle multiple formats
     let jsonText = ''
@@ -88,7 +94,7 @@ OUTPUT FORMAT:
     const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
     if (codeBlockMatch) {
       jsonText = codeBlockMatch[1].trim()
-      console.log('Extracted from code block:', jsonText)
+      console.log('Extracted from code block:', jsonText.substring(0, 200) + '...')
     } else {
       // Strategy 2: Find JSON array directly (get the outermost array)
       const firstBracket = responseText.indexOf('[')
@@ -97,6 +103,7 @@ OUTPUT FORMAT:
       if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
         jsonText = responseText.substring(firstBracket, lastBracket + 1)
         console.log('Extracted array from position', firstBracket, 'to', lastBracket)
+        console.log('Extracted JSON preview:', jsonText.substring(0, 200) + '...')
       }
     }
 
