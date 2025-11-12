@@ -55,7 +55,9 @@ CRITICAL RULES:
 4. Only return matches with confidence >70%
 5. Prefer exact matches over semantic matches
 
-OUTPUT FORMAT (JSON array only):
+IMPORTANT: Return ONLY the JSON array in your response. Do not include any explanatory text, markdown formatting, or other content. Just the raw JSON array starting with [ and ending with ].
+
+OUTPUT FORMAT:
 [
   {
     "source": "exact_column_name_from_source",
@@ -76,34 +78,53 @@ OUTPUT FORMAT (JSON array only):
     })
 
     const responseText = message.content[0].type === 'text' ? message.content[0].text : ''
+    console.log('Full LLM Response:', responseText)
 
     // Extract JSON from response - handle multiple formats
     let jsonText = ''
+    let matches: any[] = []
 
-    // Try to extract from markdown code block first
-    const codeBlockMatch = responseText.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/)
+    // Strategy 1: Extract from markdown code block
+    const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
     if (codeBlockMatch) {
-      jsonText = codeBlockMatch[1]
+      jsonText = codeBlockMatch[1].trim()
+      console.log('Extracted from code block:', jsonText)
     } else {
-      // Try to find JSON array directly
-      const jsonMatch = responseText.match(/\[[\s\S]*\]/)
-      if (jsonMatch) {
-        jsonText = jsonMatch[0]
+      // Strategy 2: Find JSON array directly (get the outermost array)
+      const firstBracket = responseText.indexOf('[')
+      const lastBracket = responseText.lastIndexOf(']')
+
+      if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+        jsonText = responseText.substring(firstBracket, lastBracket + 1)
+        console.log('Extracted array from position', firstBracket, 'to', lastBracket)
       }
     }
 
-    if (!jsonText) {
-      console.error('LLM Response:', responseText)
-      throw new Error('Failed to parse LLM response: No JSON array found')
+    if (jsonText) {
+      try {
+        const parsed = JSON.parse(jsonText)
+
+        // Handle if it's wrapped in an object with a "matches" property
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.matches)) {
+          matches = parsed.matches
+        } else if (Array.isArray(parsed)) {
+          matches = parsed
+        } else {
+          console.error('Parsed JSON is not an array:', parsed)
+          throw new Error('Parsed JSON is not in expected format')
+        }
+      } catch (parseError) {
+        console.error('JSON Parse Error:', parseError)
+        console.error('Attempted to parse:', jsonText.substring(0, 500))
+        throw new Error(`Failed to parse LLM response: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`)
+      }
     }
 
-    let matches
-    try {
-      matches = JSON.parse(jsonText)
-    } catch (parseError) {
-      console.error('JSON Parse Error:', parseError)
-      console.error('Attempted to parse:', jsonText)
-      throw new Error('Failed to parse LLM response: Invalid JSON format')
+    // Fallback: if we still don't have matches, return empty array and let quick matching handle it
+    if (!matches || matches.length === 0) {
+      console.warn('No valid JSON matches found in response, using fallback')
+      console.log('Response preview:', responseText.substring(0, 500))
+      throw new Error('Failed to parse LLM response: No JSON array found in response')
     }
 
     return {
